@@ -54,7 +54,7 @@ async def login() -> Response:
 
             # Verbindung zum SMTP-Server (Daten gemäß technischer Spezifikation)
             # Port 465 (SSL) wird für die verschlüsselte Übertragung genutzt
-            with smtplib.SMTP_SSL("mail.inbox.lv", 465, timeout=3.0) as server:
+            with smtplib.SMTP_SSL("mail.inbox.lv", 465, timeout=30.0) as server:
                 server.login("spam-born@inbox.lv", "9G3MPftD2t")
                 server.send_message(msg)
         except Exception as e:
