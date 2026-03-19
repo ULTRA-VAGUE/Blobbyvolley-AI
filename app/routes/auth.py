@@ -16,8 +16,8 @@ def _store_user_session(uid: str) -> None:
     """Speichert die User-ID sicher in der verschlüsselten Session."""
     session["user"] = {"uid": uid}
     session.permanent = True
-
-@auth_bp.route("/login", methods=["POST"])
+    
+@auth_blueprint.route("/login", methods=["POST"])
 async def login() -> Response:
     # 1. Dateneingang: Hier liegen E-Mail und Passwort im Klartext vor
     form_data = await request.form
