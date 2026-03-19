@@ -1,0 +1,6 @@
+quart
+httpx
+python-dotenv
+certifi
+hypercorn
+cachetools
