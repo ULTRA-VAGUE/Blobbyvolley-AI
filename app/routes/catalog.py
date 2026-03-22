@@ -76,15 +76,15 @@ async def addon_meta(user_id: str, catalog_type: str, stremio_id: str):
     access_token = user.get("access_token")
 
     try:
-        # 1. Basis-Informationen laden
+        # 1. Basis-Infos laden
         resp = await KitsuClient.get_anime_with_mappings(anime_id, access_token)
         data = resp.get("data", {})
         attrs = data.get("attributes", {})
         included = resp.get("included", [])
 
-        # IMDb/MAL IDs extrahieren
-        imdb_id = next((m["attributes"]["externalId"] for m in included if m["type"] == "mappings" and m["attributes"]["externalSite"] == "imdb/anime"), None)
-        mal_id = next((m["attributes"]["externalId"] for m in included if m["type"] == "mappings" and m["attributes"]["externalSite"] == "myanimelist/anime"), None)
+        # IMDb-ID finden (Der Debrid-Turbo)
+        imdb_id = next((m["attributes"]["externalId"] for m in included 
+                       if m["type"] == "mappings" and m["attributes"]["externalSite"] == "imdb/anime"), None)
 
         title = attrs.get("canonicalTitle") or attrs.get("titles", {}).get("en_jp", "Unknown")
         poster = (attrs.get("posterImage") or {}).get("large", "")
@@ -99,12 +99,14 @@ async def addon_meta(user_id: str, catalog_type: str, stremio_id: str):
             "description": attrs.get("synopsis", ""),
             "releaseInfo": attrs.get("startDate", "")[:4] if attrs.get("startDate") else "",
             "runtime": f"{attrs.get('episodeLength')} min" if attrs.get('episodeLength') else None,
-            "genres": [g["attributes"]["title"] for g in included if g["type"] == "genres"],
-            "imdb_id": imdb_id,
-            "mal_id": mal_id
+            "genres": [g["attributes"]["title"] for g in included if g["type"] == "genres"]
         }
 
-        # 2. Episoden laden (Robust gebaut)
+        # IMDb-ID für andere Addons bereitstellen
+        if imdb_id:
+            meta["imdb_id"] = imdb_id
+
+        # 2. Episoden-Array (Sieg über den Season-Counter)
         if meta["type"] == "series":
             videos = []
             try:
@@ -113,21 +115,27 @@ async def addon_meta(user_id: str, catalog_type: str, stremio_id: str):
                 for ep in ep_list:
                     e_attrs = ep.get("attributes", {})
                     num = e_attrs.get("number")
+                    
+                    # WICHTIG: Wenn IMDb da ist, nutze tt...:1:N Format. Sonst kitsu:ID:1:N.
+                    # Das ":1:" erzwingt Staffel 1 in Stremio!
+                    vid_id = f"{imdb_id}:1:{num}" if imdb_id else f"kitsu:{anime_id}:1:{num}"
+                    
                     videos.append({
-                        "id": f"{stremio_id}:{num}", # Fix: Stremio-konforme ID Formatierung
+                        "id": vid_id,
                         "title": e_attrs.get("canonicalTitle") or f"Episode {num}",
                         "season": 1,
                         "episode": num,
                         "released": e_attrs.get("airdate")
                     })
             except Exception as e:
-                logger.warning(f"Could not fetch real episode titles for {anime_id}: {e}")
+                logger.warning(f"Fallback to generic episodes for {anime_id}: {e}")
 
             # Fallback falls API keine Episoden liefert
             if not videos:
                 count = attrs.get("episodeCount") or 1
                 for i in range(1, count + 1):
-                    videos.append({"id": f"{stremio_id}:{i}", "title": f"Episode {i}", "season": 1, "episode": i})
+                    vid_id = f"{imdb_id}:1:{i}" if imdb_id else f"kitsu:{anime_id}:1:{i}"
+                    videos.append({"id": vid_id, "title": f"Episode {i}", "season": 1, "episode": i})
             
             meta["videos"] = videos
 
