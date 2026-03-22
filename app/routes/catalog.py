@@ -120,7 +120,8 @@ async def addon_catalog(user_id: str, catalog_type: str, catalog_id: str, extras
 
 @catalog_bp.route("/<user_id>/meta/<string:catalog_type>/<string:stremio_id>.json")
 async def addon_meta(user_id: str, catalog_type: str, stremio_id: str):
-    if catalog_type != "anime" or not stremio_id.startswith("kitsu:"):
+    # Fix: Akzeptiere alle im Manifest definierten Typen, da Stremio den Typ je nach Subtype variiert
+    if catalog_type not in ["anime", "series", "movie"] or not stremio_id.startswith("kitsu:"):
         return await respond_with({"meta": {}}, stremio_response=True)
 
     user, error = await get_valid_user(user_id)
