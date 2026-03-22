@@ -10,7 +10,7 @@ genres = ["Action", "Adventure", "Comedy", "Drama", "Fantasy", "Horror", "Mecha"
 
 MANIFEST: dict[str, Any] = {
     "id": "org.kitsu-stremio-sync",
-    "version": "3.3.0",
+    "version": "3.3.5",
     "name": "Kitsu Tracker",
     "description": "Your ultimate Kitsu anime catalog and watch-tracker for Stremio.",
     "logo": "https://kitsutracker.koyeb.app/static/fox_small.png",
@@ -57,7 +57,7 @@ MANIFEST: dict[str, Any] = {
     "resources": ["catalog", "subtitles", "meta"], 
     
 
-    "idPrefixes": ["kitsu"]
+    "idPrefixes": ["kitsu", "tt"]
 }
 
 @manifest_blueprint.route("/manifest.json", methods=["GET", "OPTIONS"])
