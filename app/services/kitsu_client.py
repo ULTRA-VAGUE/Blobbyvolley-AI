@@ -20,7 +20,6 @@ class KitsuClient:
     async def _request_with_retry(cls, method: str, url: str, retries=3, user_id_for_lock=None, **kwargs):
         client = cls._get_client()
         
-        # Concurrency Control: Semaphore "lazy"
         if user_id_for_lock:
             if user_id_for_lock not in cls._user_semaphores:
                 cls._user_semaphores[user_id_for_lock] = asyncio.Semaphore(3)
@@ -37,22 +36,17 @@ class KitsuClient:
                         resp = await client.patch(url, **kwargs)
                     
                     resp.raise_for_status()
-                    
                     if resp.status_code == 204:
                         return {}
-                        
                     return resp.json()
                 except (Exception, json.JSONDecodeError) as e:
                     if attempt == retries - 1:
                         logger.error(f"Kitsu API failed after {retries} attempts on {url}: {e}")
                         raise
-                    
-                    # Safe Backoff for AttributeError @ Timeouts
                     wait_time = 1 * (attempt + 1)
                     if hasattr(e, "response") and e.response is not None:
                         if e.response.status_code == 429:
                             wait_time = 2 * (attempt + 1)
-                            
                     await asyncio.sleep(wait_time) 
         finally:
             if user_id_for_lock:
@@ -77,6 +71,19 @@ class KitsuClient:
     async def get_anime(cls, anime_id: str, access_token: str):
         headers = {"Authorization": f"Bearer {access_token}", "Accept": "application/vnd.api+json"}
         return await cls._request_with_retry("GET", f"{cls.KITSU_API_URL}/anime/{anime_id}", headers=headers, timeout=5.0)
+
+    @classmethod
+    async def get_anime_with_mappings(cls, anime_id: str, access_token: str):
+        headers = {"Authorization": f"Bearer {access_token}", "Accept": "application/vnd.api+json"}
+        # Wir laden die Mappings mit, um IMDb IDs für Debrid-Dienste zu finden
+        url = f"{cls.KITSU_API_URL}/anime/{anime_id}?include=mappings"
+        return await cls._request_with_retry("GET", url, headers=headers, timeout=5.0)
+
+    @classmethod
+    async def get_anime_episodes(cls, anime_id: str, access_token: str, limit: int = 100):
+        headers = {"Authorization": f"Bearer {access_token}", "Accept": "application/vnd.api+json"}
+        url = f"{cls.KITSU_API_URL}/anime/{anime_id}/episodes?page[limit]={limit}&sort=number"
+        return await cls._request_with_retry("GET", url, headers=headers, timeout=5.0)
 
     @classmethod
     async def search_library_entries(cls, user_id: str, anime_id: str, access_token: str):
@@ -108,6 +115,5 @@ class KitsuClient:
     @classmethod
     async def get_latest_episode(cls, anime_id: str, access_token: str):
         headers = {"Authorization": f"Bearer {access_token}", "Accept": "application/vnd.api+json"}
-        # Wir sortieren absteigend (-number) und holen nur 1 Element. So wissen wir sofort, wie viele Episoden draußen sind.
         url = f"{cls.KITSU_API_URL}/anime/{anime_id}/episodes?sort=-number&page[limit]=1"
         return await cls._request_with_retry("GET", url, headers=headers, timeout=5.0)
