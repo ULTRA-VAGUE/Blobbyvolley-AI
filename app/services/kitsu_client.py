@@ -36,17 +36,21 @@ class KitsuClient:
                         resp = await client.patch(url, **kwargs)
                     
                     resp.raise_for_status()
+                    
                     if resp.status_code == 204:
                         return {}
+                        
                     return resp.json()
                 except (Exception, json.JSONDecodeError) as e:
                     if attempt == retries - 1:
                         logger.error(f"Kitsu API failed after {retries} attempts on {url}: {e}")
                         raise
+                    
                     wait_time = 1 * (attempt + 1)
                     if hasattr(e, "response") and e.response is not None:
                         if e.response.status_code == 429:
                             wait_time = 2 * (attempt + 1)
+                            
                     await asyncio.sleep(wait_time) 
         finally:
             if user_id_for_lock:
@@ -75,8 +79,8 @@ class KitsuClient:
     @classmethod
     async def get_anime_with_mappings(cls, anime_id: str, access_token: str):
         headers = {"Authorization": f"Bearer {access_token}", "Accept": "application/vnd.api+json"}
-        # Wir laden die Mappings mit, um IMDb IDs für Debrid-Dienste zu finden
-        url = f"{cls.KITSU_API_URL}/anime/{anime_id}?include=mappings"
+        # Wir laden Mappings (für IMDb/MAL) und Genres für eine bessere Optik mit
+        url = f"{cls.KITSU_API_URL}/anime/{anime_id}?include=mappings,genres"
         return await cls._request_with_retry("GET", url, headers=headers, timeout=5.0)
 
     @classmethod
