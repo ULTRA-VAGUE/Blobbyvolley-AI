@@ -117,3 +117,76 @@ async def addon_catalog(user_id: str, catalog_type: str, catalog_id: str, extras
     except Exception as e:
         logger.error(f"Catalog Error for user {user_id}: {e}")
         return await respond_with({"metas": []}, stremio_response=True)
+
+@catalog_bp.route("/<user_id>/meta/<string:catalog_type>/<string:stremio_id>.json")
+async def addon_meta(user_id: str, catalog_type: str, stremio_id: str):
+    if catalog_type != "anime" or not stremio_id.startswith("kitsu:"):
+        return await respond_with({"meta": {}}, stremio_response=True)
+
+    user, error = await get_valid_user(user_id)
+    if error:
+        return await respond_with({"meta": {}}, stremio_response=True)
+
+    anime_id = stremio_id.split(":")[1]
+    access_token = user.get("access_token")
+
+    try:
+        # 1. Basis-Informationen laden (Authentifiziert -> 18+ Content wird nicht geblockt)
+        response = await KitsuClient.get_anime(anime_id, access_token)
+        anime_data = response.get("data", {}).get("attributes")
+
+        if not anime_data:
+            return await respond_with({"meta": {}}, stremio_response=True)
+
+        title = anime_data.get("canonicalTitle") or anime_data.get("titles", {}).get("en_jp", "Unknown")
+        poster_img = anime_data.get("posterImage") or {}
+        bg_img = anime_data.get("coverImage") or {}
+        
+        kitsu_type = anime_data.get("subtype", "TV")
+        stremio_type = "movie" if kitsu_type == "movie" else "series"
+
+        meta = {
+            "id": stremio_id,
+            "type": stremio_type,
+            "name": title,
+            "poster": poster_img.get("large") if isinstance(poster_img, dict) else "",
+            "background": bg_img.get("large") if isinstance(bg_img, dict) else "",
+            "description": anime_data.get("synopsis", ""),
+            "releaseInfo": anime_data.get("startDate", "")[:4] if anime_data.get("startDate") else ""
+        }
+
+        # 2. Episoden-Array (Videos) zusammenbauen
+        if stremio_type == "series":
+            episode_count = anime_data.get("episodeCount")
+            
+            # Falls die Serie ongoing ist und keinen episodeCount hat, holen wir die Nummer der neusten Episode
+            if not episode_count:
+                latest_ep_data = await KitsuClient.get_latest_episode(anime_id, access_token)
+                if latest_ep_data and latest_ep_data.get("data"):
+                    latest_ep = latest_ep_data["data"][0]
+                    episode_count = latest_ep.get("attributes", {}).get("number")
+            
+            # Fallback, falls Kitsu absolut keine Daten liefert
+            max_eps = episode_count if episode_count else 1
+            
+            videos = []
+            for i in range(1, max_eps + 1):
+                videos.append({
+                    "id": f"kitsu:{anime_id}:{i}",
+                    "title": f"Episode {i}",
+                    "season": 1,
+                    "episode": i
+                })
+                
+            meta["videos"] = videos
+
+        return await respond_with(
+            {"meta": meta},
+            private=False,
+            cache_max_age=86400,
+            stremio_response=True
+        )
+
+    except Exception as e:
+        logger.error(f"Meta Error for {stremio_id}: {e}")
+        return await respond_with({"meta": {}}, stremio_response=True)
