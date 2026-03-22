@@ -1,6 +1,6 @@
 import logging
 from urllib.parse import unquote
-from quart import Blueprint, abort, current_app
+from quart import Blueprint, abort
 from app.services.db import get_valid_user
 from app.services.kitsu_client import KitsuClient
 from .manifest import MANIFEST
@@ -23,11 +23,14 @@ def _parse_stremio_filters(extra: str | None) -> dict:
 async def addon_catalog(user_id: str, catalog_type: str, catalog_id: str, extras: str):
     valid_ids = [c["id"] for c in MANIFEST["catalogs"]]
     if catalog_type != "anime" or catalog_id not in valid_ids: abort(404)
+    
     user, error = await get_valid_user(user_id)
     if error: return await respond_with({"metas": []}, stremio_response=True)
+    
     filters = _parse_stremio_filters(extras)
     access_token = user.get("access_token")
     stremio_metas = []
+    
     try:
         if catalog_id == "kitsu_search":
             search_query = filters.get("search")
@@ -50,11 +53,13 @@ async def addon_catalog(user_id: str, catalog_type: str, catalog_id: str, extras
                 if not rel: continue
                 a_id = rel.get("id")
                 attrs = anime_dict.get(a_id)
+                
             if not attrs: continue
-            k_type = attrs.get("subtype", "TV")
+            is_movie = attrs.get("subtype") == "movie"
+            
             stremio_metas.append({
                 "id": f"kitsu:{a_id}",
-                "type": "movie" if k_type == "movie" else "series",
+                "type": "movie" if is_movie else "series",
                 "name": attrs.get("canonicalTitle") or attrs.get("titles", {}).get("en_jp", "Unknown"),
                 "poster": (attrs.get("posterImage") or {}).get("large", ""),
                 "description": attrs.get("synopsis") or ""
@@ -76,7 +81,6 @@ async def addon_meta(user_id: str, catalog_type: str, stremio_id: str):
     if stremio_id.startswith("kitsu:"):
         anime_id = stremio_id.split(":")[1]
     elif stremio_id.startswith("tt"):
-        # WICHTIG: Zieht aus tt12345:1:1 nur die reine IMDb ID für den API-Aufruf
         imdb_query = stremio_id.split(":")[0]
         map_resp = await KitsuClient.get_anime_by_external_id(imdb_query, user["access_token"])
         if map_resp.get("data"):
@@ -98,9 +102,11 @@ async def addon_meta(user_id: str, catalog_type: str, stremio_id: str):
                 g_name = g["attributes"].get("name") or g["attributes"].get("title")
                 if g_name: safe_genres.append(g_name)
         
+        is_movie = attrs.get("subtype") == "movie"
+
         meta = {
-            "id": stremio_id, # FIX: Die zurückgegebene ID ist jetzt ZWINGEND die angefragte ID!
-            "type": "movie" if attrs.get("subtype") == "movie" else "series",
+            "id": stremio_id,
+            "type": "movie" if is_movie else "series",
             "name": attrs.get("canonicalTitle") or "Unknown Anime",
             "poster": (attrs.get("posterImage") or {}).get("large", ""),
             "background": (attrs.get("coverImage") or {}).get("large", ""),
@@ -111,13 +117,14 @@ async def addon_meta(user_id: str, catalog_type: str, stremio_id: str):
             "imdb_id": imdb_id
         }
 
-        if meta["type"] == "series":
+        if not is_movie:
             videos = []
             try:
                 ep_resp = await KitsuClient.get_anime_episodes(anime_id, user["access_token"])
                 for ep in ep_resp.get("data", []):
                     num = ep["attributes"].get("number")
                     if not num: continue
+                    # Torrentio Pflichtformat:
                     vid_id = f"{imdb_id}:1:{num}" if imdb_id else f"kitsu:{anime_id}:{num}"
                     videos.append({
                         "id": vid_id,
