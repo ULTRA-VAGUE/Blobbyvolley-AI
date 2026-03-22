@@ -54,7 +54,7 @@ MANIFEST: dict[str, Any] = {
         }
     ],
     "behaviorHints": {"configurable": True},
-    "resources": ["catalog", "subtitles"], 
+    "resources": ["catalog", "subtitles", "meta"], 
     
 
     "idPrefixes": ["kitsu"]
