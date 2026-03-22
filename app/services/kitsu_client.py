@@ -84,7 +84,7 @@ class KitsuClient:
         return await cls._request_with_retry("GET", url, headers=headers, timeout=5.0)
 
     @classmethod
-    async def get_anime_episodes(cls, anime_id: str, access_token: str, limit: int = 100):
+    async def get_anime_episodes(cls, anime_id: str, access_token: str, limit: int = 20):
         headers = {"Authorization": f"Bearer {access_token}", "Accept": "application/vnd.api+json"}
         url = f"{cls.KITSU_API_URL}/anime/{anime_id}/episodes?page[limit]={limit}&sort=number"
         return await cls._request_with_retry("GET", url, headers=headers, timeout=5.0)
