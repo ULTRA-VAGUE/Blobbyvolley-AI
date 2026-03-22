@@ -104,3 +104,10 @@ class KitsuClient:
     async def get_library_catalog(cls, user_id: str, status: str, offset: int, access_token: str):
         headers = {"Authorization": f"Bearer {access_token}", "Accept": "application/vnd.api+json"}
         return await cls._request_with_retry("GET", f"{cls.KITSU_API_URL}/library-entries?filter[user_id]={user_id}&filter[kind]=anime&filter[status]={status}&include=anime&page[limit]=20&page[offset]={offset}&sort=-updatedAt", user_id_for_lock=user_id, headers=headers, timeout=7.0)
+
+    @classmethod
+    async def get_latest_episode(cls, anime_id: str, access_token: str):
+        headers = {"Authorization": f"Bearer {access_token}", "Accept": "application/vnd.api+json"}
+        # Wir sortieren absteigend (-number) und holen nur 1 Element. So wissen wir sofort, wie viele Episoden draußen sind.
+        url = f"{cls.KITSU_API_URL}/anime/{anime_id}/episodes?sort=-number&page[limit]=1"
+        return await cls._request_with_retry("GET", url, headers=headers, timeout=5.0)
