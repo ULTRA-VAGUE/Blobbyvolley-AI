@@ -72,10 +72,13 @@ async def addon_meta(user_id: str, catalog_type: str, stremio_id: str):
     user, error = await get_valid_user(user_id)
     if error: return await respond_with({"meta": {}}, stremio_response=True)
 
-    anime_id = stremio_id.split(":")[1] if stremio_id.startswith("kitsu:") else None
-    
-    if stremio_id.startswith("tt"):
-        map_resp = await KitsuClient.get_anime_by_external_id(stremio_id, user["access_token"])
+    anime_id = None
+    if stremio_id.startswith("kitsu:"):
+        anime_id = stremio_id.split(":")[1]
+    elif stremio_id.startswith("tt"):
+        # WICHTIG: Zieht aus tt12345:1:1 nur die reine IMDb ID für den API-Aufruf
+        imdb_query = stremio_id.split(":")[0]
+        map_resp = await KitsuClient.get_anime_by_external_id(imdb_query, user["access_token"])
         if map_resp.get("data"):
             anime_id = map_resp["data"][0]["relationships"]["item"]["data"]["id"]
     
@@ -89,8 +92,14 @@ async def addon_meta(user_id: str, catalog_type: str, stremio_id: str):
 
         imdb_id = next((m["attributes"]["externalId"] for m in included if m["type"] == "mappings" and m["attributes"]["externalSite"] == "imdb/anime"), None)
         
+        safe_genres = []
+        for g in included:
+            if g.get("type") == "genres" and "attributes" in g:
+                g_name = g["attributes"].get("name") or g["attributes"].get("title")
+                if g_name: safe_genres.append(g_name)
+        
         meta = {
-            "id": imdb_id if imdb_id else f"kitsu:{anime_id}",
+            "id": stremio_id, # FIX: Die zurückgegebene ID ist jetzt ZWINGEND die angefragte ID!
             "type": "movie" if attrs.get("subtype") == "movie" else "series",
             "name": attrs.get("canonicalTitle") or "Unknown Anime",
             "poster": (attrs.get("posterImage") or {}).get("large", ""),
@@ -98,7 +107,7 @@ async def addon_meta(user_id: str, catalog_type: str, stremio_id: str):
             "description": attrs.get("synopsis", ""),
             "releaseInfo": attrs.get("startDate", "")[:4] if attrs.get("startDate") else "",
             "runtime": f"{attrs.get('episodeLength')} min" if attrs.get('episodeLength') else None,
-            "genres": [g["attributes"].get("name") or g["attributes"].get("title") for g in included if g["type"] == "genres" and "attributes" in g],
+            "genres": safe_genres,
             "imdb_id": imdb_id
         }
 
@@ -108,7 +117,8 @@ async def addon_meta(user_id: str, catalog_type: str, stremio_id: str):
                 ep_resp = await KitsuClient.get_anime_episodes(anime_id, user["access_token"])
                 for ep in ep_resp.get("data", []):
                     num = ep["attributes"].get("number")
-                    vid_id = f"{imdb_id}:1:{num}" if imdb_id else f"kitsu:{anime_id}:1:{num}"
+                    if not num: continue
+                    vid_id = f"{imdb_id}:1:{num}" if imdb_id else f"kitsu:{anime_id}:{num}"
                     videos.append({
                         "id": vid_id,
                         "title": ep["attributes"].get("canonicalTitle") or f"Episode {num}",
@@ -120,7 +130,7 @@ async def addon_meta(user_id: str, catalog_type: str, stremio_id: str):
 
             if not videos:
                 for i in range(1, (attrs.get("episodeCount") or 1) + 1):
-                    vid_id = f"{imdb_id}:1:{i}" if imdb_id else f"kitsu:{anime_id}:1:{i}"
+                    vid_id = f"{imdb_id}:1:{i}" if imdb_id else f"kitsu:{anime_id}:{i}"
                     videos.append({"id": vid_id, "title": f"Episode {i}", "season": 1, "episode": i})
             
             meta["videos"] = videos
