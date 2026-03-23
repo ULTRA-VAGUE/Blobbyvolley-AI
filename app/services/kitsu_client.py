@@ -77,3 +77,10 @@ class KitsuClient:
     async def get_library_catalog(cls, user_id: str, status: str, offset: int, access_token: str):
         headers = {"Authorization": f"Bearer {access_token}", "Accept": "application/vnd.api+json"}
         return await cls._request_with_retry("GET", f"{cls.KITSU_API_URL}/library-entries?filter[user_id]={user_id}&filter[kind]=anime&filter[status]={status}&include=anime&page[limit]=20&page[offset]={offset}&sort=-updatedAt", user_id_for_lock=user_id, headers=headers, timeout=7.0)
+
+    @classmethod
+    async def get_anime_by_external_id(cls, imdb_id: str, access_token: str):
+        headers = {"Authorization": f"Bearer {access_token}", "Accept": "application/vnd.api+json"}
+        # Löst die IMDb-ID in eine Kitsu-ID auf und zieht direkt das Item (Anime) mit
+        url = f"{cls.KITSU_API_URL}/mappings?filter[externalSite]=imdb/title&filter[externalId]={imdb_id}&include=item"
+        return await cls._request_with_retry("GET", url, headers=headers, timeout=5.0)
